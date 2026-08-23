@@ -88,9 +88,10 @@ pub struct ListState<D: ListDelegate> {
 }
 
 /// Selection and exact scroll position captured before leaving a list.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ListReturnContext {
     selected_index: Option<IndexPath>,
+    selected_item_id: Option<SharedString>,
     scroll_offset: Point<Pixels>,
 }
 
@@ -98,6 +99,11 @@ impl ListReturnContext {
     /// The selected item to restore.
     pub const fn selected_index(&self) -> Option<IndexPath> {
         self.selected_index
+    }
+
+    /// The stable accessibility id of the selected item, when supplied by the delegate.
+    pub fn selected_item_id(&self) -> Option<&SharedString> {
+        self.selected_item_id.as_ref()
     }
 
     /// The exact list scroll offset to restore.
@@ -215,9 +221,12 @@ where
     }
 
     /// Capture the selected item and exact scroll position before leaving the list.
-    pub fn return_context(&self) -> ListReturnContext {
+    pub fn return_context(&self, cx: &App) -> ListReturnContext {
         ListReturnContext {
             selected_index: self.selected_index,
+            selected_item_id: self
+                .selected_index
+                .and_then(|ix| self.delegate.item_accessibility_id(ix, cx)),
             scroll_offset: self.scroll_handle.base_handle().offset(),
         }
     }
@@ -229,12 +238,26 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_selected_index(context.selected_index, window, cx);
+        let selected_index = match context.selected_item_id.as_ref() {
+            Some(item_id) => self.index_for_accessibility_id(item_id, cx),
+            None => context.selected_index,
+        };
+        self.set_selected_index(selected_index, window, cx);
         self.scroll_handle
             .base_handle()
             .set_offset(context.scroll_offset);
         self.focus(window, cx);
         cx.notify();
+    }
+
+    fn index_for_accessibility_id(&self, item_id: &SharedString, cx: &App) -> Option<IndexPath> {
+        (0..self.delegate.sections_count(cx)).find_map(|section| {
+            (0..self.delegate.items_count(section, cx)).find_map(|row| {
+                let ix = IndexPath::new(row).section(section);
+                (self.delegate.item_accessibility_id(ix, cx).as_ref() == Some(item_id))
+                    .then_some(ix)
+            })
+        })
     }
 
     /// Set the index of the item that has been right clicked.

@@ -15,6 +15,7 @@ use gpui_component::{
 struct Delegate {
     selected: Option<IndexPath>,
     confirmed_row: Rc<Cell<Option<usize>>>,
+    item_order: Vec<usize>,
 }
 
 struct ListView(Entity<ListState<Delegate>>);
@@ -29,7 +30,7 @@ impl ListDelegate for Delegate {
     type Item = ListItem;
 
     fn items_count(&self, _: usize, _: &App) -> usize {
-        100
+        self.item_order.len()
     }
 
     fn render_item(
@@ -38,15 +39,16 @@ impl ListDelegate for Delegate {
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        Some(ListItem::new(ix.row).child(format!("Item {}", ix.row + 1)))
+        let item = self.item_order[ix.row];
+        Some(ListItem::new(ix.row).child(format!("Item {}", item + 1)))
     }
 
     fn item_accessibility_id(&self, ix: IndexPath, _: &App) -> Option<gpui::SharedString> {
-        Some(format!("test.list-item.{}", ix.row).into())
+        Some(format!("test.list-item.{}", self.item_order[ix.row]).into())
     }
 
     fn item_accessibility_label(&self, ix: IndexPath, _: &App) -> Option<gpui::SharedString> {
-        Some(format!("Item {}", ix.row + 1).into())
+        Some(format!("Item {}", self.item_order[ix.row] + 1).into())
     }
 
     fn set_selected_index(
@@ -79,6 +81,7 @@ fn list_window(
                 Delegate {
                     selected: None,
                     confirmed_row: confirmed_row.clone(),
+                    item_order: (0..100).collect(),
                 },
                 window,
                 cx,
@@ -127,7 +130,7 @@ fn list_return_context_restores_selection_scroll_and_focus(cx: &mut TestAppConte
                 .set_offset(point(px(0.), px(-42.)));
         });
     });
-    let return_context = state.read_with(&visual.cx, |state, _| state.return_context());
+    let return_context = state.read_with(&visual.cx, |state, cx| state.return_context(cx));
     visual.update(|window, cx| {
         state.update(cx, |state, cx| {
             state.set_selected_index(Some(IndexPath::new(2)), window, cx);
@@ -150,5 +153,34 @@ fn list_return_context_restores_selection_scroll_and_focus(cx: &mut TestAppConte
             .base_handle()
             .offset()),
         point(px(0.), px(-42.))
+    );
+}
+
+#[gpui::test]
+fn list_return_context_restores_stable_item_after_reorder(cx: &mut TestAppContext) {
+    let (window, state, _) = list_window(cx);
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.update(|window, cx| {
+        state.update(cx, |state, cx| {
+            state.set_selected_index(Some(IndexPath::new(1)), window, cx);
+        });
+    });
+    let return_context = state.read_with(&visual.cx, |state, cx| state.return_context(cx));
+    assert_eq!(
+        return_context.selected_item_id().map(AsRef::as_ref),
+        Some("test.list-item.1")
+    );
+
+    visual.update(|window, cx| {
+        state.update(cx, |state, cx| {
+            state.delegate_mut().item_order.swap(1, 2);
+            state.restore_return_context(return_context, window, cx);
+        });
+    });
+
+    assert_eq!(
+        state.read_with(&visual.cx, |state, _| state.selected_index()),
+        Some(IndexPath::new(2)),
+        "return must follow the stable item id instead of the stale index"
     );
 }
