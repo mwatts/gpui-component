@@ -14,8 +14,8 @@ use crate::{Icon, IndexPath, Selectable, Sizable, StyledExt};
 use crate::{VirtualListScrollHandle, list::ListDelegate, v_virtual_list};
 use gpui::{
     App, AvailableSpace, ClickEvent, Context, DefiniteLength, EdgesRefinement, EventEmitter,
-    ListSizingBehavior, RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Subscription, px, size,
+    ListSizingBehavior, Pixels, Point, RenderOnce, Role, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, StyleRefinement, Subscription, px, size,
 };
 use gpui::{
     AppContext, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
@@ -85,6 +85,25 @@ pub struct ListState<D: ListDelegate> {
     _search_task: Task<()>,
     _load_more_task: Task<()>,
     _query_input_subscription: Subscription,
+}
+
+/// Selection and exact scroll position captured before leaving a list.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ListReturnContext {
+    selected_index: Option<IndexPath>,
+    scroll_offset: Point<Pixels>,
+}
+
+impl ListReturnContext {
+    /// The selected item to restore.
+    pub const fn selected_index(&self) -> Option<IndexPath> {
+        self.selected_index
+    }
+
+    /// The exact list scroll offset to restore.
+    pub const fn scroll_offset(&self) -> Point<Pixels> {
+        self.scroll_offset
+    }
 }
 
 impl<D> ListState<D>
@@ -193,6 +212,29 @@ where
 
     pub fn selected_index(&self) -> Option<IndexPath> {
         self.selected_index
+    }
+
+    /// Capture the selected item and exact scroll position before leaving the list.
+    pub fn return_context(&self) -> ListReturnContext {
+        ListReturnContext {
+            selected_index: self.selected_index,
+            scroll_offset: self.scroll_handle.base_handle().offset(),
+        }
+    }
+
+    /// Restore a captured selection, exact scroll position, and keyboard focus.
+    pub fn restore_return_context(
+        &mut self,
+        context: ListReturnContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_selected_index(context.selected_index, window, cx);
+        self.scroll_handle
+            .base_handle()
+            .set_offset(context.scroll_offset);
+        self.focus(window, cx);
+        cx.notify();
     }
 
     /// Set the index of the item that has been right clicked.
@@ -471,13 +513,18 @@ where
         let id = SharedString::from(format!("list-item-{}", ix));
 
         let total_items = self.rows_cache.items_count();
+        let accessibility_id = self.delegate.item_accessibility_id(ix, cx);
+        let accessibility_label = self.delegate.item_accessibility_label(ix, cx);
 
         div()
             .id(id)
             .role(Role::ListItem)
+            .when_some(accessibility_id, |this, id| this.accessibility_id(id))
+            .when_some(accessibility_label, |this, label| this.aria_label(label))
             .aria_position_in_set(ix.row + 1)
             .aria_size_of_set(total_items)
             .aria_selected(selected)
+            .when(selected, |this| this.aria_active_descendant())
             .w_full()
             .relative()
             .overflow_hidden()
