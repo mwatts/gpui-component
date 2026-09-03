@@ -1,6 +1,9 @@
 [workspace]
 default-members = ["crates/story"]
 members = [
+    "crates/block-editor",
+    "crates/block-view",
+    "crates/markdown",
     "crates/kit",
     "crates/base",
     "crates/base/examples/wasm",
@@ -37,7 +40,12 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
+block-markdown = { path = "crates/markdown" }
+gpui-component-block-editor = { path = "crates/block-editor" }
+gpui-component-block-view = { path = "crates/block-view" }
 gpui-kit = { path = "crates/kit", version = "0.6.0" }
+loro = "1.13"
+uuid = { version = "1", features = ["v4"] }
 gpui-component = { path = "crates/component", version = "0.6.0" }
 gpui-base = { path = "crates/base", version = "0.6.0" }
 gpui-component-macros = { path = "crates/component-macros", version = "0.6.0" }
